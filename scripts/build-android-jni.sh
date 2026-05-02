@@ -115,6 +115,26 @@ for abi in $ABIS; do
     target_env="$(echo "$rust_target" | tr 'a-z-' 'A-Z_')"
     export "CARGO_TARGET_${target_env}_LINKER=$clang"
 
+    # Pass `-Wl,-z,max-page-size=16384` to lld so the produced .so's
+    # ELF LOAD segments are 16-KB-aligned. Required by Android 15+ on
+    # devices with 16 KB page sizes — the OS otherwise pops a
+    # compatibility warning at first launch ("ELF alignment check
+    # failed. This app will be run using page size compatible mode")
+    # AND Play Store will reject 16-KB-misaligned APKs starting Nov
+    # 2025 per the platform 16-KB requirement.
+    #
+    # The default ld.lld page-size for `-target *-android` is 4096
+    # (the Android NDK was built when 4 KB was the only Android page
+    # size). Setting max-page-size to 16384 makes the linker round
+    # every PT_LOAD segment's vaddr to a 16-KB boundary, which is
+    # backward-compatible with 4-KB-page devices (16 KB is a multiple
+    # of 4 KB) and correct for 16-KB-page devices.
+    #
+    # Cargo merges this with any other RUSTFLAGS the user has set;
+    # we use the per-target env var so it scopes only to Android
+    # targets (avoids breaking host builds).
+    export "CARGO_TARGET_${target_env}_RUSTFLAGS=-C link-arg=-Wl,-z,max-page-size=16384"
+
     # The cc-rs crate (used by some transitive build.rs scripts in
     # arkworks/jellyfish) honours CC_<rust-target> / CXX_<rust-target>
     # / AR_<rust-target>. Those names have hyphens in the rust target
