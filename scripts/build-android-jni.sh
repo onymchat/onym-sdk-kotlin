@@ -15,14 +15,13 @@
 #
 # Approach: configure the per-target Cargo linker via
 # `CARGO_TARGET_<TARGET>_LINKER` env vars pointing at the NDK's
-# clang wrappers. These are inherited by the sub-cargo invocations
-# from rust-jni/build.rs (which compiles the four sep-*-ffi
-# staticlibs for the same target — see the --target propagation
-# fix in build.rs).
+# clang wrappers. The four sep-*-ffi crates are compiled as Rust
+# path deps in the same cargo invocation as rust-jni (no build.rs
+# sub-cargo gymnastics), so a single set of env vars covers
+# everything.
 #
-# Why not cargo-ndk: cargo-ndk wraps the top-level cargo invocation
-# but does not propagate its env to build.rs's spawned cargo
-# children. Setting the env vars ourselves works for both layers.
+# Why not cargo-ndk: this script is a small portable shell that
+# does the same thing without an extra rust-tool dep.
 
 set -eu
 
@@ -101,8 +100,7 @@ for abi in $ABIS; do
     # Cargo target env-var name: uppercase, hyphens -> underscores.
     target_env="$(echo "$rust_target" | tr 'a-z-' 'A-Z_')"
 
-    # Per-target cargo linker. Inherited by build.rs's spawned cargo
-    # so the FFI staticlib builds use the same linker.
+    # Per-target cargo linker. Used for the cdylib link.
     eval "export CARGO_TARGET_${target_env}_LINKER=\"$clang\""
 
     # `cc` crate (used by some transitive build.rs scripts in
@@ -112,22 +110,13 @@ for abi in $ABIS; do
     eval "export CXX_${rust_target}=\"${clang}++\""
     eval "export AR_${rust_target}=\"$TOOLCHAIN_BIN/llvm-ar\""
 
-    # Make sure rustup has the target installed for the active
-    # toolchain (build.rs will install it for the FFI sub-builds via
-    # their own rust-toolchain.toml when needed).
+    # Install the target for rust-jni's toolchain. The FFI crates
+    # are path-dep rlibs in the same cargo invocation, so they share
+    # this toolchain — no per-crate target install needed.
     if ! ( cd "$REPO_ROOT/rust-jni" && rustup target list --installed | grep -q "^${rust_target}\$" ); then
         echo "==> Installing Rust target $rust_target"
         ( cd "$REPO_ROOT/rust-jni" && rustup target add "$rust_target" )
     fi
-    # Also install for each FFI crate's pinned toolchain so build.rs's
-    # spawned cargo can find it.
-    for ffi_crate in sep-common-ffi sep-anarchy-ffi sep-oneonone-ffi sep-tyranny-ffi; do
-        ffi_dir="$CONTRACTS_ROOT/plonk/$ffi_crate"
-        if ! ( cd "$ffi_dir" && rustup target list --installed | grep -q "^${rust_target}\$" ); then
-            echo "==> Installing Rust target $rust_target (toolchain pinned by $ffi_crate)"
-            ( cd "$ffi_dir" && rustup target add "$rust_target" )
-        fi
-    done
 
     echo "==> cargo build --release --target $rust_target  (rust-jni for $abi)"
     ( cd "$REPO_ROOT/rust-jni" && cargo build --release --target "$rust_target" )

@@ -18,12 +18,73 @@ use jni::objects::{JByteArray, JClass, JString};
 use jni::sys::{jboolean, jbyteArray, jint, jlong, jstring};
 use jni::JNIEnv;
 
-// FFI re-exports: the four crates are linked transitively via Cargo
-// path deps, so their `extern "C"` symbols are already available in
-// this cdylib. We declare the prototypes explicitly here so the JNI
-// shim has visible signatures — matches what the linker will resolve
-// from the staticlib aggregations.
+// The four FFI crates are Rust path deps (rlibs in cargo's view) —
+// see rust-jni/Cargo.toml. Each rlib `#[no_mangle] pub extern "C" fn
+// onym_*` symbol IS in the rlib's compiled object, but rustc's dead-
+// code analysis does not consider an `extern "C"` declaration in this
+// crate to be a "use" of the rlib's same-named function — they're
+// link-resolved, not Rust-resolved. Without a Rust-level reference,
+// rustc strips the rlib symbols before linking, and the cdylib link
+// fails with "undefined symbol _onym_<...>".
+//
+// The `_onym_ffi_keepalive` function below takes the address of every
+// onym_* symbol via its Rust path. That counts as a Rust-level
+// reference, holds the rlib symbols in the dep graph, and the linker
+// then resolves the `extern "C"` decls in the JNI bridge functions
+// against them. The function itself is `#[no_mangle] pub extern "C"`
+// so the linker keeps IT alive (preventing the keep-alive from being
+// dead-stripped). It is never called from JNI / Kotlin — pure DCE
+// barrier. Returns 25 (the symbol count) so the result isn't elided.
+//
+// Same pattern as onym-sdk-swift/rust/onym-ffi-umbrella.
 
+#[no_mangle]
+pub extern "C" fn _onym_ffi_keepalive() -> usize {
+    let table: [usize; 25] = [
+        // sep-common-ffi (11 symbols)
+        onym_sep_common_ffi::onym_byte_buffer_free            as usize,
+        onym_sep_common_ffi::onym_string_free                 as usize,
+        onym_sep_common_ffi::onym_compute_leaf_hash           as usize,
+        onym_sep_common_ffi::onym_compute_public_key          as usize,
+        onym_sep_common_ffi::onym_compute_merkle_root         as usize,
+        onym_sep_common_ffi::onym_compute_sha256_commitment   as usize,
+        onym_sep_common_ffi::onym_compute_poseidon_commitment as usize,
+        onym_sep_common_ffi::onym_parse_plonk_proof           as usize,
+        onym_sep_common_ffi::onym_nostr_derive_public_key     as usize,
+        onym_sep_common_ffi::onym_nostr_sign_event_id         as usize,
+        onym_sep_common_ffi::onym_nostr_verify_event_signature as usize,
+        // sep-anarchy-ffi (6 symbols)
+        onym_sep_anarchy_ffi::onym_anarchy_bake_membership_vk            as usize,
+        onym_sep_anarchy_ffi::onym_anarchy_bake_update_vk                as usize,
+        onym_sep_anarchy_ffi::onym_anarchy_pinned_membership_vk_sha256_hex as usize,
+        onym_sep_anarchy_ffi::onym_anarchy_pinned_update_vk_sha256_hex     as usize,
+        onym_sep_anarchy_ffi::onym_anarchy_prove_membership              as usize,
+        onym_sep_anarchy_ffi::onym_anarchy_prove_update                  as usize,
+        // sep-oneonone-ffi (2 symbols)
+        onym_sep_oneonone_ffi::onym_oneonone_bake_create_vk as usize,
+        onym_sep_oneonone_ffi::onym_oneonone_prove_create   as usize,
+        // sep-tyranny-ffi (6 symbols)
+        onym_sep_tyranny_ffi::onym_tyranny_bake_create_vk             as usize,
+        onym_sep_tyranny_ffi::onym_tyranny_bake_update_vk             as usize,
+        onym_sep_tyranny_ffi::onym_tyranny_pinned_create_vk_sha256_hex as usize,
+        onym_sep_tyranny_ffi::onym_tyranny_pinned_update_vk_sha256_hex as usize,
+        onym_sep_tyranny_ffi::onym_tyranny_prove_create               as usize,
+        onym_sep_tyranny_ffi::onym_tyranny_prove_update               as usize,
+    ];
+    // Volatile read prevents fat LTO from reasoning the array away
+    // entirely. Address-taking already keeps each symbol alive, but
+    // an unused array could otherwise be elided.
+    let mut acc: usize = 0;
+    for ptr in &table {
+        acc = acc.wrapping_add(unsafe { core::ptr::read_volatile(ptr) });
+    }
+    let _ = acc;
+    table.len()
+}
+
+// `extern "C"` declarations matching the link-resolved symbols above.
+// Cargo path deps make the symbols available; the keep-alive function
+// is what holds them through Rust's dead-code analysis.
 mod ffi {
     use std::ffi::c_char;
 
