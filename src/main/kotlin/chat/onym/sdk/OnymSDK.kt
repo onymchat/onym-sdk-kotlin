@@ -33,5 +33,5 @@ object OnymSDK {
     /** Semantic version of this SDK release. Bump when the public
      *  Kotlin API surface changes; FFI ABI changes (from the submodule)
      *  are tracked separately via the pinned commit. */
-    const val VERSION = "0.1.0"
+    const val VERSION = "0.0.1"
 }

@@ -111,7 +111,27 @@ Errors are surfaced as `OnymException` with the verbatim message from
 the underlying FFI — already names the offending parameter, expected
 length, etc.
 
-## Build
+## Install (consume from a Gradle project)
+
+Released versions are published as an **Android AAR** to a static
+Maven repository hosted on the `releases` branch of this repo. To
+consume:
+
+```kotlin
+repositories {
+    maven { url = uri("https://raw.githubusercontent.com/onymchat/onym-sdk-kotlin/releases/") }
+}
+dependencies {
+    implementation("chat.onym:onym-sdk:0.0.1")
+}
+```
+
+The AAR bundles the Kotlin classes + cross-compiled
+`libonym_sdk_jni.so` for the four Android ABIs (`arm64-v8a`,
+`armeabi-v7a`, `x86_64`, `x86`). No Rust toolchain or NDK needed at
+consumer-build time.
+
+## Build (development)
 
 ```sh
 git submodule update --init --recursive
@@ -123,6 +143,20 @@ The host build produces a single `libonym_sdk_jni.{so,dylib}` at
 `rust-jni/target/release/`. The script also stages it into
 `src/main/resources/native/<os>/<arch>/` so Gradle bundles it inside
 the JAR.
+
+### Cross-compile + AAR (manual)
+
+```sh
+ANDROID_NDK_HOME=$ANDROID_HOME/ndk/27.0.12077973 ./scripts/build-android-jni.sh
+./gradlew bundleAar    # → build/libs/onym-sdk-0.0.1.aar
+```
+
+This is what `.github/workflows/release.yml` invokes. To cut a
+release and publish to the Maven repo + GitHub Release:
+
+```sh
+gh workflow run Release -f tag=v0.0.1
+```
 
 ### Native-lib loading strategy
 
@@ -142,19 +176,16 @@ the JAR.
 If neither path resolves, `UnsatisfiedLinkError` names both attempted
 locations so consumers can diagnose without spelunking.
 
-### Multi-platform / Android
+### Multi-platform JVM
 
-This repo currently ships **one host's binary slice** (whatever you
-ran `./scripts/build-host-jni.sh` on). Cross-compiling to additional
-JVM targets (linux-x86_64, linux-aarch64, etc.) means running
-`cargo build --target=...` per target and copying each `lib*.so` into
-the matching `src/main/resources/native/<os>/<arch>/` directory before
-`./gradlew jar`.
-
-**Android AAR packaging** (per-ABI `.so` files in `src/main/jniLibs/`,
-under the `com.android.library` plugin) is a follow-up — see
-`scripts/build-android-jni.sh` (currently a stub with the steps
-documented).
+The host JAR ships **one host's binary slice** (whatever you ran
+`./scripts/build-host-jni.sh` on). Cross-compiling to additional JVM
+targets (linux-x86_64, linux-aarch64, macOS slices for desktop JVM
+consumers, etc.) means running `cargo build --target=...` per target
+and copying each `lib*.{so,dylib}` into the matching
+`src/main/resources/native/<os>/<arch>/` directory before
+`./gradlew jar`. The release workflow does NOT publish a multi-host
+JVM JAR today — the published AAR is for Android consumers only.
 
 ## Versioning
 
@@ -192,9 +223,16 @@ have their own release cycles in `onym-contracts`.
 │   └── internal/OnymJni.kt         ← @JvmStatic external fun decls +
 │                                     splitTwoBuffers() helper
 ├── src/test/kotlin/chat/onym/sdk/  ← 25 JUnit 5 cases
+├── aar/
+│   ├── AndroidManifest.xml         ← minimal stub for the AAR root
+│   └── R.txt                       ← empty stub (required by AAR spec)
 ├── scripts/
-│   ├── build-host-jni.sh           ← cargo build → .so/.dylib
-│   └── build-android-jni.sh        ← TODO (per-ABI cross-compile)
+│   ├── build-host-jni.sh           ← cargo build → .so/.dylib (dev)
+│   ├── build-android-jni.sh        ← per-ABI cross-compile via NDK clang
+│   └── publish-to-releases-branch.sh  ← static Maven repo publisher
+├── .github/workflows/
+│   ├── ci.yml                      ← PR/push: build host + ./gradlew test
+│   └── release.yml                 ← workflow_dispatch: AAR + Maven publish
 └── External/
     └── onym-contracts/             ← submodule
 ```

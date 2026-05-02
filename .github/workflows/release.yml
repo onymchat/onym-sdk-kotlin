@@ -1,0 +1,178 @@
+name: Release
+
+# Cuts an OnymSDK Kotlin release: cross-compile rust-jni for the
+# four Android ABIs, assemble the AAR (classes.jar + jni/<abi>/*.so),
+# publish to the static Maven repo on the `releases` branch, push
+# the tag, attach the AAR to a GitHub Release. Main is never touched.
+#
+# Trigger manually:
+#   gh workflow run Release -f tag=v0.0.1
+#
+# Consumer-side (any Gradle project):
+#   repositories {
+#       maven { url = uri("https://raw.githubusercontent.com/onymchat/onym-sdk-kotlin/releases/") }
+#   }
+#   dependencies {
+#       implementation("chat.onym:onym-sdk:0.0.1")
+#   }
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag (e.g. v0.0.1)'
+        required: true
+
+permissions:
+  contents: write   # tag push, releases-branch push, GitHub Release creation
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+
+    steps:
+      - name: Checkout (with submodules)
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
+        with:
+          submodules: recursive
+          fetch-depth: 0
+
+      - name: Validate tag input
+        run: |
+          set -eu
+          TAG="${{ inputs.tag }}"
+          if ! echo "$TAG" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "tag must look like vX.Y.Z (got: $TAG)" >&2
+            exit 1
+          fi
+          if git rev-parse "refs/tags/$TAG" >/dev/null 2>&1; then
+            echo "tag $TAG already exists locally" >&2
+            exit 1
+          fi
+          if git ls-remote --tags origin "refs/tags/$TAG" | grep -q .; then
+            echo "tag $TAG already exists on origin" >&2
+            exit 1
+          fi
+          # build.gradle.kts version must match the tag (minus the leading v)
+          GRADLE_VERSION="$(grep -E '^version\s*=' build.gradle.kts | head -n1 | sed -E 's/version\s*=\s*"([^"]+)"/\1/')"
+          EXPECTED="${TAG#v}"
+          if [ "$GRADLE_VERSION" != "$EXPECTED" ]; then
+            echo "tag $TAG implies version $EXPECTED but build.gradle.kts says $GRADLE_VERSION" >&2
+            exit 1
+          fi
+
+      - name: Install Rust 1.88.0 + Android targets
+        run: |
+          set -eu
+          rustup toolchain install 1.88.0 --profile minimal
+          for tgt in \
+              aarch64-linux-android \
+              armv7-linux-androideabi \
+              x86_64-linux-android \
+              i686-linux-android; do
+            rustup target add --toolchain 1.88.0 "$tgt"
+          done
+
+      - name: Cache cargo registry + targets
+        uses: Swatinem/rust-cache@42dc69e1aa15d09112580998cf2ef0119e2e91ae  # v2.9.1
+        with:
+          workspaces: |
+            rust-jni -> target
+            External/onym-contracts/plonk/sep-common-ffi -> target
+            External/onym-contracts/plonk/sep-anarchy-ffi -> target
+            External/onym-contracts/plonk/sep-oneonone-ffi -> target
+            External/onym-contracts/plonk/sep-tyranny-ffi -> target
+          key: rust-1.88.0-android-${{ hashFiles('rust-jni/Cargo.lock') }}
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@c1e323688fd81a25caa38c78aa6df2d33d3e20d9  # v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Set up Gradle (with build cache)
+        uses: gradle/actions/setup-gradle@0b6dd653ba04f4f93bf581ec31e66cbd7dcb644d  # v4
+
+      - name: Set up Android SDK + NDK
+        uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407  # v3
+        with:
+          # Pin the NDK version explicitly. Bump in concert with the
+          # ANDROID_API constant in scripts/build-android-jni.sh.
+          packages: 'ndk;27.0.12077973'
+
+      - name: Build host JNI + ./gradlew test (release gate)
+        run: |
+          set -eu
+          ./scripts/build-host-jni.sh
+          ./gradlew test --no-daemon
+
+      - name: Cross-compile rust-jni to four Android ABIs
+        env:
+          ANDROID_NDK_HOME: ${{ env.ANDROID_NDK_ROOT }}
+        run: |
+          # setup-android exports ANDROID_NDK_ROOT (path to the
+          # versioned NDK install) — re-export as ANDROID_NDK_HOME
+          # which our build script reads.
+          if [ -z "${ANDROID_NDK_HOME:-}" ]; then
+            ANDROID_NDK_HOME="$ANDROID_NDK_ROOT"
+            export ANDROID_NDK_HOME
+          fi
+          ./scripts/build-android-jni.sh
+
+      - name: Assemble AAR + publish to local Maven dir
+        run: |
+          set -eu
+          ./gradlew bundleAar \
+                    publishAarPublicationToReleaseRepository \
+                    -PreleaseRepoUrl="file://$(pwd)/build/maven-local" \
+                    --no-daemon
+
+      - name: Configure git identity
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Publish Maven layout to releases branch
+        run: |
+          ./scripts/publish-to-releases-branch.sh \
+              --version "$(echo '${{ inputs.tag }}' | sed 's/^v//')" \
+              --repo "${{ github.repository }}"
+
+      - name: Tag the release commit (annotated, on main)
+        run: |
+          set -eu
+          # Tag points at the SHA the release was cut from (i.e. main's
+          # current HEAD). Unlike the Swift SDK's tag-only synthetic
+          # commit, here we want consumers cloning the tag to get the
+          # actual source for that release — there's no in-tree
+          # binaryTarget URL to rewrite (the AAR lives on the releases
+          # branch, decoupled from the tag).
+          git tag -a "${{ inputs.tag }}" -m "release ${{ inputs.tag }}"
+          git push origin "refs/tags/${{ inputs.tag }}"
+
+      - name: Create GitHub Release with AAR + POM attached
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -eu
+          VERSION="$(echo '${{ inputs.tag }}' | sed 's/^v//')"
+          AAR="build/libs/onym-sdk-${VERSION}.aar"
+          POM="build/maven-local/chat/onym/onym-sdk/${VERSION}/onym-sdk-${VERSION}.pom"
+          [ -f "$AAR" ] || { echo "missing $AAR" >&2; exit 1; }
+          [ -f "$POM" ] || { echo "missing $POM" >&2; exit 1; }
+          gh release create "${{ inputs.tag }}" \
+              "$AAR" "$POM" \
+              --title "OnymSDK Kotlin ${{ inputs.tag }}" \
+              --notes "OnymSDK Kotlin ${{ inputs.tag }} — Android AAR with the four \`onym-contracts/plonk/sep-*-ffi\` staticlibs cross-compiled for arm64-v8a, armeabi-v7a, x86_64, x86 and bundled with the Kotlin classes.
+
+          ## Consume from a Gradle project
+
+          \`\`\`kotlin
+          repositories {
+              maven { url = uri(\"https://raw.githubusercontent.com/${{ github.repository }}/releases/\") }
+          }
+          dependencies {
+              implementation(\"chat.onym:onym-sdk:${VERSION}\")
+          }
+          \`\`\`"
