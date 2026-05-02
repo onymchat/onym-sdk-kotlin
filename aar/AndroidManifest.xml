@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Minimal AndroidManifest required by the AAR spec. The OnymSDK
+    AAR ships only a JNI cdylib + Kotlin classes — no Activities,
+    Services, Receivers, or Permissions. Consumer apps declare
+    everything they need in their own manifest.
+-->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+          package="chat.onym.sdk">
+</manifest>

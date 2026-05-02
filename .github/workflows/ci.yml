@@ -1,0 +1,51 @@
+name: CI
+
+# Pre-flight on PR / push to main: build the rust-jni cdylib for the
+# host (Linux x86_64) and run the JUnit 5 suite. Cheap (~3-5 min) —
+# catches FFI signature drift and Kotlin wrapper regressions without
+# paying for the Android cross-compile that the Release workflow does.
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout (with submodules)
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
+        with:
+          submodules: recursive
+
+      - name: Install Rust 1.88.0 (host target only)
+        run: rustup toolchain install 1.88.0 --profile minimal
+
+      - name: Cache cargo registry + targets
+        uses: Swatinem/rust-cache@42dc69e1aa15d09112580998cf2ef0119e2e91ae  # v2.9.1
+        with:
+          # rust-jni's build.rs invokes cargo on each FFI crate in its
+          # own dir, so each has its own target/. List them all.
+          workspaces: |
+            rust-jni -> target
+            External/onym-contracts/plonk/sep-common-ffi -> target
+            External/onym-contracts/plonk/sep-anarchy-ffi -> target
+            External/onym-contracts/plonk/sep-oneonone-ffi -> target
+            External/onym-contracts/plonk/sep-tyranny-ffi -> target
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@c1e323688fd81a25caa38c78aa6df2d33d3e20d9  # v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Set up Gradle (with build cache)
+        uses: gradle/actions/setup-gradle@0b6dd653ba04f4f93bf581ec31e66cbd7dcb644d  # v4
+
+      - name: Build host JNI cdylib
+        run: ./scripts/build-host-jni.sh
+
+      - name: ./gradlew test
+        run: ./gradlew test --no-daemon
