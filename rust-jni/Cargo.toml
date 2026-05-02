@@ -1,0 +1,29 @@
+[package]
+name = "onym-sdk-jni"
+version = "0.1.0"
+edition = "2021"
+description = "JNI bridge from chat.onym.sdk Kotlin to the four onym-contracts plonk FFI staticlibs."
+license = "MIT"
+publish = false
+build = "build.rs"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+# JNI bridge. Lifetime-correct API (jni 0.21+); throws via env.throw_new.
+jni = "0.21"
+
+# The four FFI crates are NOT Rust deps — they're linked as prebuilt
+# staticlibs by build.rs. Rust path deps are built as rlibs by Cargo,
+# which does NOT export the rlibs' #[no_mangle] symbols into a
+# downstream cdylib unless the consumer explicitly references each
+# function from Rust source. The C ABI declarations in src/lib.rs
+# don't count as "references" from Rust's dead-code analysis (they're
+# pure linker-resolved). So we link the staticlibs directly — same
+# pattern the Swift SDK uses.
+
+[profile.release]
+opt-level = 3
+lto = "fat"
+codegen-units = 1

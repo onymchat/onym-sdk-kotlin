@@ -1,0 +1,3 @@
+[submodule "External/onym-contracts"]
+	path = External/onym-contracts
+	url = git@github.com:onymchat/onym-contracts.git
