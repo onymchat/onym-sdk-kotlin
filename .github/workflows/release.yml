@@ -108,16 +108,11 @@ jobs:
           ./gradlew test --no-daemon
 
       - name: Cross-compile rust-jni to four Android ABIs
-        env:
-          ANDROID_NDK_HOME: ${{ env.ANDROID_NDK_ROOT }}
         run: |
-          # setup-android exports ANDROID_NDK_ROOT (path to the
-          # versioned NDK install) — re-export as ANDROID_NDK_HOME
-          # which our build script reads.
-          if [ -z "${ANDROID_NDK_HOME:-}" ]; then
-            ANDROID_NDK_HOME="$ANDROID_NDK_ROOT"
-            export ANDROID_NDK_HOME
-          fi
+          # android-actions/setup-android exports ANDROID_NDK_ROOT
+          # to $GITHUB_ENV after installing the NDK; the build
+          # script accepts either ANDROID_NDK_HOME or
+          # ANDROID_NDK_ROOT.
           ./scripts/build-android-jni.sh
 
       - name: Assemble AAR + publish to local Maven dir

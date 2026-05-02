@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/bin/bash
 # Cross-compile the rust-jni cdylib to all four Android ABIs and
 # stage them under build/android/jniLibs/<abi>/libonym_sdk_jni.so —
 # the path the Gradle bundleAar task picks up when assembling the
@@ -6,6 +6,7 @@
 #
 # Usage:
 #   ANDROID_NDK_HOME=/path/to/ndk ./scripts/build-android-jni.sh
+#   (or set ANDROID_NDK_ROOT — the script accepts either)
 #
 # Outputs:
 #   build/android/jniLibs/arm64-v8a/libonym_sdk_jni.so
@@ -20,6 +21,11 @@
 # sub-cargo gymnastics), so a single set of env vars covers
 # everything.
 #
+# Why bash and not /bin/sh: the cc-rs crate honours env vars like
+# `CC_aarch64-linux-android` (with hyphens). POSIX sh / Ubuntu's
+# `dash` rejects hyphens in variable names with "bad variable
+# name". bash accepts them via `eval "export VAR_NAME=..."`.
+#
 # Why not cargo-ndk: this script is a small portable shell that
 # does the same thing without an extra rust-tool dep.
 
@@ -28,11 +34,18 @@ set -eu
 SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
 REPO_ROOT="$(CDPATH= cd -- "$SCRIPT_DIR/.." && pwd)"
 
-[ -n "${ANDROID_NDK_HOME:-}" ] || {
-    echo "set ANDROID_NDK_HOME to the path of your Android NDK install" >&2
+# Accept either ANDROID_NDK_HOME or ANDROID_NDK_ROOT. android-actions/
+# setup-android exports the latter to $GITHUB_ENV; tooling outside
+# CI typically uses the former.
+if [ -z "${ANDROID_NDK_HOME:-}" ]; then
+    ANDROID_NDK_HOME="${ANDROID_NDK_ROOT:-}"
+fi
+[ -n "$ANDROID_NDK_HOME" ] || {
+    echo "set ANDROID_NDK_HOME (or ANDROID_NDK_ROOT) to the path of your Android NDK install" >&2
     echo "(e.g. \$ANDROID_HOME/ndk/27.x.y)" >&2
     exit 1
 }
+export ANDROID_NDK_HOME
 
 CONTRACTS_ROOT="$REPO_ROOT/External/onym-contracts"
 [ -d "$CONTRACTS_ROOT/plonk" ] || {
