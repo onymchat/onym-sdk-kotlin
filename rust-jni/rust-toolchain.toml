@@ -1,0 +1,7 @@
+[toolchain]
+# Match plonk/prover/rust-toolchain.toml — we depend on
+# onym-plonk-prover transitively through the four sep-*-ffi crates;
+# all share the arkworks-0.5 / jellyfish build graph and need 1.88.0.
+channel = "1.88.0"
+components = ["rustfmt", "clippy"]
+profile = "minimal"
