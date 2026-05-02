@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0" xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <modelVersion>4.0.0</modelVersion>
+  <groupId>chat.onym</groupId>
+  <artifactId>onym-sdk</artifactId>
+  <version>0.0.2</version>
+  <packaging>aar</packaging>
+  <name>OnymSDK</name>
+  <description>Kotlin / Android SDK for the per-type plonk FFI surface from onym-contracts (sep-{common,anarchy,oneonone,tyranny}-ffi).</description>
+  <url>https://github.com/onymchat/onym-sdk-kotlin</url>
+  <licenses>
+    <license>
+      <name>MIT</name>
+      <url>https://opensource.org/licenses/MIT</url>
+    </license>
+  </licenses>
+  <scm>
+    <connection>scm:git:git://github.com/onymchat/onym-sdk-kotlin.git</connection>
+    <developerConnection>scm:git:ssh://git@github.com/onymchat/onym-sdk-kotlin.git</developerConnection>
+    <url>https://github.com/onymchat/onym-sdk-kotlin</url>
+  </scm>
+</project>
