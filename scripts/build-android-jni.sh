@@ -110,18 +110,19 @@ for abi in $ABIS; do
         exit 1
     }
 
-    # Cargo target env-var name: uppercase, hyphens -> underscores.
+    # Cargo's per-target linker var has underscored uppercase form
+    # (no hyphens), so `export` is fine for it.
     target_env="$(echo "$rust_target" | tr 'a-z-' 'A-Z_')"
+    export "CARGO_TARGET_${target_env}_LINKER=$clang"
 
-    # Per-target cargo linker. Used for the cdylib link.
-    eval "export CARGO_TARGET_${target_env}_LINKER=\"$clang\""
-
-    # `cc` crate (used by some transitive build.rs scripts in
-    # arkworks/jellyfish) honours CC_<rust-target> and AR_<rust-target>.
-    # Note: hyphens preserved in the env name (cc crate quirk).
-    eval "export CC_${rust_target}=\"$clang\""
-    eval "export CXX_${rust_target}=\"${clang}++\""
-    eval "export AR_${rust_target}=\"$TOOLCHAIN_BIN/llvm-ar\""
+    # The cc-rs crate (used by some transitive build.rs scripts in
+    # arkworks/jellyfish) honours CC_<rust-target> / CXX_<rust-target>
+    # / AR_<rust-target>. Those names have hyphens in the rust target
+    # triple. POSIX shell identifiers are `[a-zA-Z_][a-zA-Z0-9_]*`,
+    # so `export` and shell variable assignment refuse them — both
+    # dash AND modern bash. We use the `env` command to pass them
+    # via argv at the cargo invocation, which bypasses the shell
+    # variable namespace entirely.
 
     # Install the target for rust-jni's toolchain. The FFI crates
     # are path-dep rlibs in the same cargo invocation, so they share
@@ -132,7 +133,11 @@ for abi in $ABIS; do
     fi
 
     echo "==> cargo build --release --target $rust_target  (rust-jni for $abi)"
-    ( cd "$REPO_ROOT/rust-jni" && cargo build --release --target "$rust_target" )
+    ( cd "$REPO_ROOT/rust-jni" && \
+      env "CC_${rust_target}=$clang" \
+          "CXX_${rust_target}=${clang}++" \
+          "AR_${rust_target}=$TOOLCHAIN_BIN/llvm-ar" \
+          cargo build --release --target "$rust_target" )
 
     src="$REPO_ROOT/rust-jni/target/$rust_target/release/libonym_sdk_jni.so"
     [ -f "$src" ] || { echo "missing $src" >&2; exit 1; }
