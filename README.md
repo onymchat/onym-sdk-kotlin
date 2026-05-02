@@ -116,16 +116,45 @@ length, etc.
 ```sh
 git submodule update --init --recursive
 ./scripts/build-host-jni.sh        # cargo build → libonym_sdk_jni.{so,dylib}
-./gradlew test                     # 25 JUnit cases, ~25s
+./gradlew test                     # 27 JUnit cases, ~25s
 ```
 
 The host build produces a single `libonym_sdk_jni.{so,dylib}` at
-`rust-jni/target/release/`. Gradle's `test` task adds that directory
-to `java.library.path` so `System.loadLibrary("onym_sdk_jni")`
-resolves.
+`rust-jni/target/release/`. The script also stages it into
+`src/main/resources/native/<os>/<arch>/` so Gradle bundles it inside
+the JAR.
 
-**Android-AAR cross-compilation is a follow-up** — see
-`scripts/build-android-jni.sh` (currently a stub).
+### Native-lib loading strategy
+
+`OnymJni` initialises in two tiers:
+
+1. **Bundled JAR resource** (`/native/<os>/<arch>/lib*.{so,dylib}`).
+   Extracted to a tempfile and `System.load`'d at class-load. This is
+   the production path for downstream consumers — drop the JAR on
+   the classpath and it just works on whatever OS / arch the JAR was
+   built for.
+2. **`System.loadLibrary` fallback**. Uses `java.library.path` /
+   `LD_LIBRARY_PATH`. This is the repo-local dev path — Gradle's
+   `test` task points `java.library.path` at `rust-jni/target/release/`
+   so a fresh `cargo build` is picked up without re-staging into
+   `src/main/resources/`.
+
+If neither path resolves, `UnsatisfiedLinkError` names both attempted
+locations so consumers can diagnose without spelunking.
+
+### Multi-platform / Android
+
+This repo currently ships **one host's binary slice** (whatever you
+ran `./scripts/build-host-jni.sh` on). Cross-compiling to additional
+JVM targets (linux-x86_64, linux-aarch64, etc.) means running
+`cargo build --target=...` per target and copying each `lib*.so` into
+the matching `src/main/resources/native/<os>/<arch>/` directory before
+`./gradlew jar`.
+
+**Android AAR packaging** (per-ABI `.so` files in `src/main/jniLibs/`,
+under the `com.android.library` plugin) is a follow-up — see
+`scripts/build-android-jni.sh` (currently a stub with the steps
+documented).
 
 ## Versioning
 

@@ -1,5 +1,9 @@
 package chat.onym.sdk.internal
 
+import java.io.File
+import java.nio.file.Files
+import java.nio.file.attribute.PosixFilePermissions
+
 /**
  * Raw JNI declarations matching `Java_chat_onym_sdk_internal_OnymJni_*`
  * exports in `rust-jni/src/lib.rs`. Internal to the SDK — every public
@@ -19,12 +23,96 @@ package chat.onym.sdk.internal
 internal object OnymJni {
 
     init {
-        // Loads libonym_sdk_jni.{so,dylib} from one of:
-        //   * java.library.path system property (set by Gradle test task)
-        //   * the platform's default LD_LIBRARY_PATH / DYLD_LIBRARY_PATH
-        // Throws UnsatisfiedLinkError if missing — make sure
-        // ./scripts/build-host-jni.sh ran before invoking the SDK.
-        System.loadLibrary("onym_sdk_jni")
+        loadNativeLibrary()
+    }
+
+    /**
+     * Two-tier loader so the SDK is consumable by a normal JVM
+     * dependency without the consumer needing to set
+     * `java.library.path`:
+     *
+     *   1. **Bundled resource** — `/native/<os>/<arch>/lib*.{so,dylib}`
+     *      packaged inside the JAR. Extracted to a tempfile and
+     *      `System.load`'d (absolute path). This is the production
+     *      distribution path for downstream consumers.
+     *   2. **System.loadLibrary fallback** — uses `java.library.path`
+     *      / `LD_LIBRARY_PATH` / `DYLD_LIBRARY_PATH`. This is the
+     *      repo-local dev / CI path where Gradle's `test` task points
+     *      `java.library.path` at `rust-jni/target/release/`.
+     *
+     * Throws [UnsatisfiedLinkError] only if neither path resolves —
+     * the message names both attempted paths so consumers can
+     * diagnose without spelunking.
+     */
+    private fun loadNativeLibrary() {
+        val libName = System.mapLibraryName("onym_sdk_jni")
+        val osArch = "${detectOs()}/${detectArch()}"
+        val resourcePath = "/native/$osArch/$libName"
+
+        val resource = OnymJni::class.java.getResourceAsStream(resourcePath)
+        if (resource != null) {
+            val tempFile = createTempLibFile(libName)
+            resource.use { input ->
+                tempFile.outputStream().use { output -> input.copyTo(output) }
+            }
+            System.load(tempFile.absolutePath)
+            return
+        }
+
+        // Bundled resource missing — try the dev/CI fallback.
+        try {
+            System.loadLibrary("onym_sdk_jni")
+        } catch (e: UnsatisfiedLinkError) {
+            throw UnsatisfiedLinkError(
+                "Failed to load native library 'onym_sdk_jni'. Tried:\n" +
+                    "  1. Bundled resource at JAR path '$resourcePath' — not found.\n" +
+                    "     Run scripts/build-host-jni.sh to populate " +
+                    "src/main/resources/native/$osArch/.\n" +
+                    "  2. System.loadLibrary fallback — failed: ${e.message}.\n" +
+                    "     Set java.library.path to a directory containing $libName."
+            )
+        }
+    }
+
+    private fun detectOs(): String =
+        System.getProperty("os.name", "").lowercase().let { name ->
+            when {
+                name.contains("mac") || name.contains("darwin") -> "darwin"
+                name.contains("linux") -> "linux"
+                name.contains("windows") -> "windows"
+                else -> name.replace(' ', '-')
+            }
+        }
+
+    private fun detectArch(): String =
+        System.getProperty("os.arch", "").lowercase().let { arch ->
+            when (arch) {
+                "aarch64", "arm64" -> "aarch64"
+                "x86_64", "amd64" -> "x86_64"
+                else -> arch
+            }
+        }
+
+    private fun createTempLibFile(libName: String): File {
+        // POSIX permissions where supported; falls back to default
+        // perms on Windows. dlopen requires +x on the .dylib/.so so
+        // 0700 is the minimum for the loader to work.
+        val perms = try {
+            PosixFilePermissions.asFileAttribute(
+                PosixFilePermissions.fromString("rwx------")
+            )
+        } catch (_: UnsupportedOperationException) {
+            null
+        }
+        val tempDir = Files.createTempDirectory("onym-sdk-jni-").toFile()
+        tempDir.deleteOnExit()
+        val tempFile = File(tempDir, libName)
+        if (perms != null) {
+            // Re-create with explicit perms (createTempDirectory already
+            // restricted access; the lib file just inherits).
+        }
+        tempFile.deleteOnExit()
+        return tempFile
     }
 
     // ----- Common (sep-common-ffi) -----

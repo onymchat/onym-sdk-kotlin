@@ -80,6 +80,36 @@ class AnarchyTests {
     }
 
     @Test
+    fun `prove update empty new-roster array is rejected (not silently treated as reuse)`() {
+        // Audit Finding 1 regression: a non-null but empty `byte[]`
+        // for memberLeafHashesNew must NOT collapse to the {NULL, 0}
+        // sentinel. The doc says "pass null to reuse old roster" —
+        // anything else (including empty array) must surface as an
+        // error from the FFI's strict-mixed-state guard.
+        val leaves = canonicalLeafHashes()
+        val proverIndex = 3
+        val proverSk = fr((proverIndex + 1).toLong())
+
+        val ex = assertThrows<OnymException> {
+            Anarchy.proveUpdate(
+                depth = 5,
+                memberLeafHashesOld = leaves,
+                memberLeafHashesNew = byteArrayOf(),  // non-null, len = 0
+                proverSecretKey = proverSk,
+                proverIndexOld = proverIndex,
+                epochOld = 1234L,
+                saltOld = ByteArray(32) { 0xEE.toByte() },
+                saltNew = ByteArray(32) { 0xFF.toByte() },
+            )
+        }
+        assertTrue(
+            ex.message!!.contains("non-NULL") ||
+                ex.message!!.contains("length is 0"),
+            "expected mixed-state error, got: ${ex.message}"
+        )
+    }
+
+    @Test
     fun `prove membership rejects mismatched secret key`() {
         val leaves = canonicalLeafHashes()
         // Lie: claim slot 3 but supply key #5.

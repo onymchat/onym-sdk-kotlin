@@ -1,0 +1,28 @@
+# macOS
+.DS_Store
+
+# Gradle
+.gradle/
+build/
+!gradle/wrapper/gradle-wrapper.jar
+
+# Kotlin / IntelliJ
+*.iml
+.idea/
+out/
+
+# Cargo / Rust
+**/target/
+
+# Local environment
+.env
+.env.*
+!.env.example
+*.swp
+
+# Host-built native lib staged here by scripts/build-host-jni.sh.
+# Don't commit the binary — let each developer / CI build for their
+# own host. Cross-compiled Android / multi-platform binaries will
+# follow a separate distribution path (per-platform Maven artifacts
+# or a publish pipeline).
+src/main/resources/native/

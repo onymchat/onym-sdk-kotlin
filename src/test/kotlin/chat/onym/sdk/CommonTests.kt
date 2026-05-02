@@ -108,6 +108,20 @@ class CommonTests {
     }
 
     @Test
+    fun `nostr verify returns false for malformed inputs (does not throw)`() {
+        // Audit Finding 3 regression: the FFI conflates "verification
+        // failed" with "input length wrong" into a single bool return.
+        // The wrapper docs reflect this — both must yield `false`,
+        // not throw.
+        val tooShortPk = ByteArray(31)
+        val eventId = ByteArray(32)
+        val sig = ByteArray(64)
+        // Should NOT throw OnymException for the malformed pubkey.
+        val result = Common.nostrVerifyEventSignature(tooShortPk, eventId, sig)
+        assertFalse(result, "malformed input must return false (not throw)")
+    }
+
+    @Test
     fun `invalid secretKey length throws`() {
         val ex = assertThrows<OnymException> {
             Common.leafHash(byteArrayOf(0x01, 0x02))

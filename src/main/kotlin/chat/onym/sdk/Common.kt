@@ -94,8 +94,17 @@ object Common {
     /**
      * Verify a BIP340 Schnorr signature over a 32-byte event id.
      *
-     * @return `true` iff the signature is valid; `false` otherwise.
-     *   Throws [OnymException] only on malformed input lengths.
+     * @return `true` iff the signature is cryptographically valid AND
+     *   all three inputs are well-formed (`publicKey` 32 B, `eventId`
+     *   32 B, `signature` 64 B). `false` for any failure mode —
+     *   bad signature, wrong byte length, malformed BIP340 point, etc.
+     *
+     *   The underlying FFI conflates "verification failed" with
+     *   "input was malformed" into a single `bool` return; this
+     *   wrapper inherits that. If you need to distinguish the two
+     *   cases, validate input lengths in your call site first
+     *   (`require(publicKey.size == 32)` etc.) and treat any
+     *   subsequent `false` as a signature-validity failure.
      */
     fun nostrVerifyEventSignature(
         publicKey: ByteArray, eventId: ByteArray, signature: ByteArray

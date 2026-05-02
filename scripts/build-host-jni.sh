@@ -51,4 +51,26 @@ fi
 SIZE=$(ls -lh "$LIB" | awk '{print $5}')
 echo
 echo "Built: $LIB  ($SIZE)"
-echo "Gradle's test task picks this up via java.library.path."
+
+# ---------------------------------------------------------------------
+# Stage the .dylib/.so into src/main/resources/native/<os>/<arch>/ so
+# Gradle includes it in the JAR. OnymJni.kt's loader extracts it from
+# the JAR resources at class-load time. This makes the SDK consumable
+# as a normal Maven/Gradle dep on the same OS/arch the build targeted.
+# (Cross-compile for additional OS/arch slices is a follow-up.)
+# ---------------------------------------------------------------------
+case "$(uname -s)/$(uname -m)" in
+    Darwin/arm64)        OS_ARCH="darwin/aarch64" ;;
+    Darwin/x86_64)       OS_ARCH="darwin/x86_64"  ;;
+    Linux/aarch64)       OS_ARCH="linux/aarch64"  ;;
+    Linux/x86_64)        OS_ARCH="linux/x86_64"   ;;
+    *) echo "warning: unrecognised host $(uname -s)/$(uname -m); skipping resource staging" >&2 ;;
+esac
+
+if [ -n "${OS_ARCH:-}" ]; then
+    RES_DIR="$REPO_ROOT/src/main/resources/native/$OS_ARCH"
+    mkdir -p "$RES_DIR"
+    cp "$LIB" "$RES_DIR/"
+    echo "Staged: $RES_DIR/$(basename "$LIB")"
+    echo "        (gitignored — Gradle picks it up from src/main/resources/)"
+fi

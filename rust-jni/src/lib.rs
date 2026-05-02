@@ -470,17 +470,24 @@ pub extern "system" fn Java_chat_onym_sdk_internal_OnymJni_anarchyProveUpdate<'l
 ) -> jbyteArray {
     unsafe {
         let old_v = jbytearray_to_vec(&mut env, &leaves_old);
-        // Kotlin passes an empty byte[0] as the "reuse old" sentinel —
-        // converted here to (NULL, 0) to match the FFI's strict
-        // {NULL, 0} requirement.
-        let new_obj_is_null = leaves_new.is_null();
-        let new_v: Vec<u8> = if new_obj_is_null {
-            Vec::new()
+        // Map Java null reference → (NULL, 0) — the FFI's "reuse old
+        // roster" sentinel.
+        // Map non-null Java array → (real ptr, real len), even when
+        // len == 0. This lets the FFI's strict-mixed-state guard
+        // reject `byte[0]` ("valid_ptr + zero_len") with a clear
+        // error rather than silently treating it as "reuse old".
+        // Vec::as_ptr() is non-null even for empty Vecs (Rust's
+        // dangling-but-aligned guarantee), so we never accidentally
+        // hand the FFI a NULL ptr for a non-null Java array.
+        let new_v_opt: Option<Vec<u8>> = if leaves_new.is_null() {
+            None
         } else {
-            jbytearray_to_vec(&mut env, &leaves_new)
+            Some(jbytearray_to_vec(&mut env, &leaves_new))
         };
-        let new_ptr: *const u8 = if new_v.is_empty() { ptr::null() } else { new_v.as_ptr() };
-        let new_len: usize = new_v.len();
+        let (new_ptr, new_len): (*const u8, usize) = match &new_v_opt {
+            None => (ptr::null(), 0),
+            Some(v) => (v.as_ptr(), v.len()),
+        };
         let sk_v = jbytearray_to_vec(&mut env, &prover_sk);
         let salt_old_v = jbytearray_to_vec(&mut env, &salt_old);
         let salt_new_v = jbytearray_to_vec(&mut env, &salt_new);
