@@ -5,7 +5,6 @@ edition = "2021"
 description = "JNI bridge from chat.onym.sdk Kotlin to the four onym-contracts plonk FFI staticlibs."
 license = "MIT"
 publish = false
-build = "build.rs"
 
 [lib]
 crate-type = ["cdylib"]
@@ -14,14 +13,31 @@ crate-type = ["cdylib"]
 # JNI bridge. Lifetime-correct API (jni 0.21+); throws via env.throw_new.
 jni = "0.21"
 
-# The four FFI crates are NOT Rust deps — they're linked as prebuilt
-# staticlibs by build.rs. Rust path deps are built as rlibs by Cargo,
-# which does NOT export the rlibs' #[no_mangle] symbols into a
-# downstream cdylib unless the consumer explicitly references each
-# function from Rust source. The C ABI declarations in src/lib.rs
-# don't count as "references" from Rust's dead-code analysis (they're
-# pure linker-resolved). So we link the staticlibs directly — same
-# pattern the Swift SDK uses.
+# The four FFI crates as Rust path deps (rlibs). Each FFI crate
+# declares `crate-type = ["staticlib", "cdylib", "rlib"]`, so cargo
+# auto-selects the rlib variant when a Rust dep references it. This
+# is the SAME pattern the Swift SDK's onym-ffi-umbrella uses, and
+# it's the only correct way to combine multiple Rust crates into one
+# cdylib:
+#
+# Building each FFI crate as a standalone STATICLIB (the previous
+# approach via build.rs) embeds a separate copy of Rust std into
+# each .a — including `rust_eh_personality`, `EMPTY_PANIC`, and
+# `ARGV_INIT_ARRAY`. Linking those into one cdylib then errors out
+# with "multiple definition" on Linux (GNU ld). macOS ld64 silently
+# dedupes them, which is why the previous setup worked on darwin
+# and failed on the ubuntu-latest CI runner.
+#
+# With rlib path deps, cargo treats the four FFI crates as
+# compilation units in the cdylib's dep graph — std is bundled once
+# at the cdylib boundary, and the `#[no_mangle] pub extern "C" fn
+# onym_*` symbols from each rlib are pulled in by the explicit
+# `extern "C"` references in src/lib.rs (the JNI bridge functions
+# call them via those declarations).
+onym-sep-common-ffi   = { path = "../External/onym-contracts/plonk/sep-common-ffi" }
+onym-sep-anarchy-ffi  = { path = "../External/onym-contracts/plonk/sep-anarchy-ffi" }
+onym-sep-oneonone-ffi = { path = "../External/onym-contracts/plonk/sep-oneonone-ffi" }
+onym-sep-tyranny-ffi  = { path = "../External/onym-contracts/plonk/sep-tyranny-ffi" }
 
 [profile.release]
 opt-level = 3
